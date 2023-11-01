@@ -21,6 +21,8 @@ from loguru import logger
 from yahooquery import Ticker
 from dateutil.tz import tzlocal
 
+import tushare as ts
+
 
 from qlib.tests.data import GetData
 from qlib.utils import code_to_fname, fname_to_code, exists_qlib_data
@@ -42,10 +44,9 @@ from data_collector.utils import (
     generate_minutes_calendar_from_daily,
 )
 
-INDEX_BENCH_URL = "http://push2his.eastmoney.com/api/qt/stock/kline/get?secid=1.{index_code}&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56%2Cf57%2Cf58&klt=101&fqt=0&beg={begin}&end={end}"
+tsapi = ts.pro_api('7804bdb8824c428d767ecd366f45c86d76f9d0a1f19a152dd2a90cbb')
 
-
-class YahooCollector(BaseCollector):
+class TushareCollector(BaseCollector):
     retry = 5  # Configuration attribute.  How many times will it try to re-request the data if the network fails.
 
     def __init__(
@@ -83,7 +84,7 @@ class YahooCollector(BaseCollector):
         limit_nums: int
             using for debug, by default None
         """
-        super(YahooCollector, self).__init__(
+        super(TushareCollector, self).__init__(
             save_dir=save_dir,
             start=start,
             end=end,
@@ -94,7 +95,6 @@ class YahooCollector(BaseCollector):
             check_data_length=check_data_length,
             limit_nums=limit_nums,
         )
-
         self.init_datetime()
 
     def init_datetime(self):
@@ -127,13 +127,23 @@ class YahooCollector(BaseCollector):
         error_msg = f"{symbol}-{interval}-{start}-{end}"
 
         def _show_logging_func():
-            if interval == YahooCollector.INTERVAL_1min and show_1min_logging:
+            if interval == TushareCollector.INTERVAL_1min and show_1min_logging:
                 logger.warning(f"{error_msg}:{_resp}")
-
         interval = "1m" if interval in ["1m", "1min"] else interval
         try:
-            _resp = Ticker(symbol, asynchronous=False).history(interval=interval, start=start, end=end)
-            print(_resp)
+            freq = "min" # 支持分钟(min)/日(D)/周(W)/月(M)K线
+            start_date = ""
+            end_date = ""
+            if interval == TushareCollector.INTERVAL_1d:
+                freq = "D"
+                start_date = start.strftime("%Y%m%d")
+                end_date = end.strftime("%Y%m%d")
+            else:
+                freq = "min"
+                start_date = start.strftime("%Y-%m-%d %H:%M:%S")
+                end_date = end.strftime("%Y-%m-%d %H:%M:%S")
+            # 开始日期 (日线格式：YYYYMMDD，提取分钟数据请用2019-09-01 09:00:00这种格式)
+            _resp = tsapi.pro_bar(ts_code=symbol, freq=freq, start_date=start_date, end_date=end_date)
             if isinstance(_resp, pd.DataFrame):
                 return _resp.reset_index()
             elif isinstance(_resp, dict):
@@ -147,7 +157,7 @@ class YahooCollector(BaseCollector):
         except Exception as e:
             logger.warning(
                 f"get data error: {symbol}--{start}--{end}"
-                + "Your data request fails. This may be caused by your firewall (e.g. GFW). Please switch your network if you want to access Yahoo! data"
+                + "Your data request fails. This may be caused by your firewall (e.g. GFW). Please switch your network if you want to access Tushare! data"
             )
 
     def get_data(
@@ -195,7 +205,7 @@ class YahooCollector(BaseCollector):
 
     def collector_data(self):
         """collector data"""
-        super(YahooCollector, self).collector_data()
+        super(TushareCollector, self).collector_data()
         self.download_index_data()
 
     @abc.abstractmethod
@@ -203,16 +213,44 @@ class YahooCollector(BaseCollector):
         """download index data"""
         raise NotImplementedError("rewrite download_index_data")
 
-class YahooCollectorCN(YahooCollector, ABC):
+class TushareCollectorCN(TushareCollector, ABC):
+    def get_tushare_symbols(qlib_data_path: [str, Path] = None) -> list:
+        """get crypto symbols in coingecko
+
+        Returns
+        -------
+            tushare symbols in given exchanges list of coingecko
+        """
+        global _CG_TUSHARE_SYMBOLS
+
+        @deco_retry
+        def _get_tushare_symbol_data():
+            try:
+                resp = tsapi.stock_basic()
+            except:
+                raise ValueError("request error")
+            try:
+                _symbols = resp["ts_code"].to_list()
+                # _symbols = [sub + "-usd" for sub in _symbols]
+            except Exception as e:
+                logger.warning(f"request error: {e}")
+                raise
+            return _symbols
+
+        if _CG_TUSHARE_SYMBOLS is None:
+            _all_symbols = _get_tushare_symbol_data()
+
+            _CG_TUSHARE_SYMBOLS = sorted(set(_all_symbols))
+
+        return _CG_TUSHARE_SYMBOLS
+        
     def get_instrument_list(self):
-        logger.info("get HS stock symbols......")
-        symbols = get_hs_stock_symbols()
+        logger.info("get tushare stock symbols......")
+        symbols = self.get_tushare_symbols()
         logger.info(f"get {len(symbols)} symbols.")
         return symbols
 
     def normalize_symbol(self, symbol):
-        symbol_s = symbol.split(".")
-        symbol = f"sh{symbol_s[0]}" if symbol_s[-1] == "ss" else f"sz{symbol_s[0]}"
         return symbol
 
     @property
@@ -220,7 +258,7 @@ class YahooCollectorCN(YahooCollector, ABC):
         return "Asia/Shanghai"
 
 
-class YahooCollectorCN1d(YahooCollectorCN):
+class TushareCollectorCN1d(TushareCollectorCN):
     def download_index_data(self):
         # TODO: from MSN
         _format = "%Y%m%d"
@@ -253,19 +291,19 @@ class YahooCollectorCN1d(YahooCollectorCN):
             time.sleep(5)
 
 
-class YahooCollectorCN1min(YahooCollectorCN):
+class TushareCollectorCN1min(TushareCollectorCN):
     def get_instrument_list(self):
-        symbols = super(YahooCollectorCN1min, self).get_instrument_list()
+        symbols = super(TushareCollectorCN1min, self).get_instrument_list()
         return symbols + ["000300.ss", "000905.ss", "000903.ss"]
 
     def download_index_data(self):
         pass
 
-class YahooCollectorCRYPTO(YahooCollector, ABC):
+class TushareCollectorCRYPTO(TushareCollector, ABC):
     def get_instrument_list(self):
         logger.info("get crypto symbols......")
         symbols = get_cg_crypto_symbols()
-        # logger.info(symbols)
+        logger.info(symbols)
         logger.info(f"get {len(symbols)} symbols.")
         return symbols
 
@@ -280,10 +318,10 @@ class YahooCollectorCRYPTO(YahooCollector, ABC):
     def _timezone(self):
         return "Asia/Shanghai"
 
-class YahooCollectorCRYPTO1d(YahooCollectorCRYPTO):
+class TushareCollectorCRYPTO1d(TushareCollectorCRYPTO):
     pass
 
-class YahooCollectorUS(YahooCollector, ABC):
+class TushareCollectorUS(TushareCollector, ABC):
     def get_instrument_list(self):
         logger.info("get US stock symbols......")
         symbols = get_us_stock_symbols() + [
@@ -305,15 +343,15 @@ class YahooCollectorUS(YahooCollector, ABC):
         return "America/New_York"
 
 
-class YahooCollectorUS1d(YahooCollectorUS):
+class TushareCollectorUS1d(TushareCollectorUS):
     pass
 
 
-class YahooCollectorUS1min(YahooCollectorUS):
+class TushareCollectorUS1min(TushareCollectorUS):
     pass
 
 
-class YahooCollectorIN(YahooCollector, ABC):
+class TushareCollectorIN(TushareCollector, ABC):
     def get_instrument_list(self):
         logger.info("get INDIA stock symbols......")
         symbols = get_in_stock_symbols()
@@ -331,19 +369,19 @@ class YahooCollectorIN(YahooCollector, ABC):
         return "Asia/Kolkata"
 
 
-class YahooCollectorIN1d(YahooCollectorIN):
+class TushareCollectorIN1d(TushareCollectorIN):
     pass
 
 
-class YahooCollectorIN1min(YahooCollectorIN):
+class TushareCollectorIN1min(TushareCollectorIN):
     pass
 
 
-class YahooCollectorBR(YahooCollector, ABC):
+class TushareCollectorBR(TushareCollector, ABC):
     def retry(cls):
         """
         The reason to use retry=2 is due to the fact that
-        Yahoo Finance unfortunately does not keep track of some
+        Tushare Finance unfortunately does not keep track of some
         Brazilian stocks.
 
         Therefore, the decorator deco_retry with retry argument
@@ -355,7 +393,7 @@ class YahooCollectorBR(YahooCollector, ABC):
         order to improve download speed.
 
         To achieve this goal an abstract attribute (retry)
-        was added into YahooCollectorBR base class
+        was added into TushareCollectorBR base class
         """
         raise NotImplementedError
 
@@ -378,17 +416,17 @@ class YahooCollectorBR(YahooCollector, ABC):
         return "Brazil/East"
 
 
-class YahooCollectorBR1d(YahooCollectorBR):
+class TushareCollectorBR1d(TushareCollectorBR):
     retry = 2
     pass
 
 
-class YahooCollectorBR1min(YahooCollectorBR):
+class TushareCollectorBR1min(TushareCollectorBR):
     retry = 2
     pass
 
 
-class YahooNormalize(BaseNormalize):
+class TushareNormalize(BaseNormalize):
     COLUMNS = ["open", "close", "high", "low", "volume"]
     DAILY_FORMAT = "%Y-%m-%d"
 
@@ -413,7 +451,7 @@ class YahooNormalize(BaseNormalize):
         if df.empty:
             return df
         symbol = df.loc[df[symbol_field_name].first_valid_index(), symbol_field_name]
-        columns = copy.deepcopy(YahooNormalize.COLUMNS)
+        columns = copy.deepcopy(TushareNormalize.COLUMNS)
         df = df.copy()
         df.set_index(date_field_name, inplace=True)
         df.index = pd.to_datetime(df.index)
@@ -430,14 +468,14 @@ class YahooNormalize(BaseNormalize):
         df.sort_index(inplace=True)
         df.loc[(df["volume"] <= 0) | np.isnan(df["volume"]), list(set(df.columns) - {symbol_field_name})] = np.nan
 
-        change_series = YahooNormalize.calc_change(df, last_close)
-        # NOTE: The data obtained by Yahoo finance sometimes has exceptions
+        change_series = TushareNormalize.calc_change(df, last_close)
+        # NOTE: The data obtained by Tushare finance sometimes has exceptions
         # WARNING: If it is normal for a `symbol(exchange)` to differ by a factor of *89* to *111* for consecutive trading days,
         # WARNING: the logic in the following line needs to be modified
         _count = 0
         while True:
             # NOTE: may appear unusual for many days in a row
-            change_series = YahooNormalize.calc_change(df, last_close)
+            change_series = TushareNormalize.calc_change(df, last_close)
             _mask = (change_series >= 89) & (change_series <= 111)
             if not _mask.any():
                 break
@@ -450,7 +488,7 @@ class YahooNormalize(BaseNormalize):
                     f"{_symbol} `change` is abnormal for {_count} consecutive days, please check the specific data file carefully"
                 )
 
-        df["change"] = YahooNormalize.calc_change(df, last_close)
+        df["change"] = TushareNormalize.calc_change(df, last_close)
 
         columns += ["change"]
         df.loc[(df["volume"] <= 0) | np.isnan(df["volume"]), columns] = np.nan
@@ -472,7 +510,7 @@ class YahooNormalize(BaseNormalize):
         raise NotImplementedError("rewrite adjusted_price")
 
 
-class YahooNormalize1d(YahooNormalize, ABC):
+class TushareNormalize1d(TushareNormalize, ABC):
     DAILY_FORMAT = "%Y-%m-%d"
 
     def adjusted_price(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -496,7 +534,7 @@ class YahooNormalize1d(YahooNormalize, ABC):
         return df.reset_index()
 
     def normalize(self, df: pd.DataFrame) -> pd.DataFrame:
-        df = super(YahooNormalize1d, self).normalize(df)
+        df = super(TushareNormalize1d, self).normalize(df)
         df = self._manual_adj_data(df)
         return df
 
@@ -505,7 +543,7 @@ class YahooNormalize1d(YahooNormalize, ABC):
 
         Notes
         -----
-            For incremental updates(append) to Yahoo 1D data, user need to use a close that is not 0 on the first trading day of the existing data
+            For incremental updates(append) to Tushare 1D data, user need to use a close that is not 0 on the first trading day of the existing data
         """
         df = df.loc[df["close"].first_valid_index() :]
         _close = df["close"].iloc[0]
@@ -530,7 +568,7 @@ class YahooNormalize1d(YahooNormalize, ABC):
         return df.reset_index()
 
 
-class YahooNormalize1dExtend(YahooNormalize1d):
+class TushareNormalize1dExtend(TushareNormalize1d):
     def __init__(
         self, old_qlib_data_dir: [str, Path], date_field_name: str = "date", symbol_field_name: str = "symbol", **kwargs
     ):
@@ -545,7 +583,7 @@ class YahooNormalize1dExtend(YahooNormalize1d):
         symbol_field_name: str
             symbol field name, default is symbol
         """
-        super(YahooNormalize1dExtend, self).__init__(date_field_name, symbol_field_name)
+        super(TushareNormalize1dExtend, self).__init__(date_field_name, symbol_field_name)
         self._first_close_field = "first_close"
         self._ori_close_field = "ori_close"
         self.old_qlib_data = self._get_old_data(old_qlib_data_dir)
@@ -570,7 +608,7 @@ class YahooNormalize1dExtend(YahooNormalize1d):
         try:
             _close = self._get_close(df, field_name=self._first_close_field)
         except KeyError:
-            _close = super(YahooNormalize1dExtend, self)._get_first_close(df)
+            _close = super(TushareNormalize1dExtend, self)._get_first_close(df)
         return _close
 
     def _get_last_close(self, df: pd.DataFrame) -> float:
@@ -617,7 +655,7 @@ class YahooNormalize1dExtend(YahooNormalize1d):
         return df
 
 
-class YahooNormalize1min(YahooNormalize, ABC):
+class TushareNormalize1min(TushareNormalize, ABC):
     AM_RANGE = None  # type: tuple  # eg: ("09:30:00", "11:29:00")
     PM_RANGE = None  # type: tuple  # eg: ("13:00:00", "14:59:00")
 
@@ -647,10 +685,10 @@ class YahooNormalize1min(YahooNormalize, ABC):
                 data_1d.columns = [self._date_field_name, self._symbol_field_name, "paused", "volume", "factor", "close"]
 
         """
-        data_1d = YahooCollector.get_data_from_remote(self.symbol_to_yahoo(symbol), interval="1d", start=start, end=end)
+        data_1d = TushareCollector.get_data_from_remote(symbol, interval="1d", start=start, end=end)
         if not (data_1d is None or data_1d.empty):
             _class_name = self.__class__.__name__.replace("min", "d")
-            _class: type(YahooNormalize) = getattr(importlib.import_module("collector"), _class_name)
+            _class: type(TushareNormalize) = getattr(importlib.import_module("collector"), _class_name)
             data_1d_obj = _class(self._date_field_name, self._symbol_field_name)
             data_1d = data_1d_obj.normalize(data_1d)
         return data_1d
@@ -776,7 +814,7 @@ class YahooNormalize1min(YahooNormalize, ABC):
         raise NotImplementedError("rewrite _get_1d_calendar_list")
 
 
-class YahooNormalize1minOffline(YahooNormalize1min):
+class TushareNormalize1minOffline(TushareNormalize1min):
     """Normalised to 1min using local 1d data"""
 
     def __init__(
@@ -794,7 +832,7 @@ class YahooNormalize1minOffline(YahooNormalize1min):
             symbol field name, default is symbol
         """
         self.qlib_data_1d_dir = qlib_data_1d_dir
-        super(YahooNormalize1minOffline, self).__init__(date_field_name, symbol_field_name)
+        super(TushareNormalize1minOffline, self).__init__(date_field_name, symbol_field_name)
         self._all_1d_data = self._get_all_1d_data()
 
     def _get_1d_calendar_list(self) -> Iterable[pd.Timestamp]:
@@ -831,17 +869,17 @@ class YahooNormalize1minOffline(YahooNormalize1min):
         ]
 
 
-class YahooNormalizeUS:
+class TushareNormalizeUS:
     def _get_calendar_list(self) -> Iterable[pd.Timestamp]:
         # TODO: from MSN
         return get_calendar_list("US_ALL")
 
 
-class YahooNormalizeUS1d(YahooNormalizeUS, YahooNormalize1d):
+class TushareNormalizeUS1d(TushareNormalizeUS, TushareNormalize1d):
     pass
 
 
-class YahooNormalizeUS1min(YahooNormalizeUS, YahooNormalize1minOffline):
+class TushareNormalizeUS1min(TushareNormalizeUS, TushareNormalize1minOffline):
     CALC_PAUSED_NUM = False
 
     def _get_calendar_list(self) -> Iterable[pd.Timestamp]:
@@ -855,16 +893,16 @@ class YahooNormalizeUS1min(YahooNormalizeUS, YahooNormalize1minOffline):
         return fname_to_code(symbol)
 
 
-class YahooNormalizeIN:
+class TushareNormalizeIN:
     def _get_calendar_list(self) -> Iterable[pd.Timestamp]:
         return get_calendar_list("IN_ALL")
 
 
-class YahooNormalizeIN1d(YahooNormalizeIN, YahooNormalize1d):
+class TushareNormalizeIN1d(TushareNormalizeIN, TushareNormalize1d):
     pass
 
 
-class YahooNormalizeIN1min(YahooNormalizeIN, YahooNormalize1minOffline):
+class TushareNormalizeIN1min(TushareNormalizeIN, TushareNormalize1minOffline):
     CALC_PAUSED_NUM = False
 
     def _get_calendar_list(self) -> Iterable[pd.Timestamp]:
@@ -878,31 +916,31 @@ class YahooNormalizeIN1min(YahooNormalizeIN, YahooNormalize1minOffline):
         return fname_to_code(symbol)
 
 
-class YahooNormalizeCRYPTO:
+class TushareNormalizeCRYPTO:
     def _get_calendar_list(self) -> Iterable[pd.Timestamp]:
         return None
 
 
-class YahooNormalizeCRYPTO1d(YahooNormalizeCRYPTO, YahooNormalize1d):
+class TushareNormalizeCRYPTO1d(TushareNormalizeCRYPTO, TushareNormalize1d):
     pass
 
 
-class YahooNormalizeCN:
+class TushareNormalizeCN:
     def _get_calendar_list(self) -> Iterable[pd.Timestamp]:
         # TODO: from MSN
         return get_calendar_list("ALL")
 
 
-class YahooNormalizeCN1d(YahooNormalizeCN, YahooNormalize1d):
+class TushareNormalizeCN1d(TushareNormalizeCN, TushareNormalize1d):
     pass
 
 
 
-class YahooNormalizeCN1dExtend(YahooNormalizeCN, YahooNormalize1dExtend):
+class TushareNormalizeCN1dExtend(TushareNormalizeCN, TushareNormalize1dExtend):
     pass
 
 
-class YahooNormalizeCN1min(YahooNormalizeCN, YahooNormalize1minOffline):
+class TushareNormalizeCN1min(TushareNormalizeCN, TushareNormalize1minOffline):
     AM_RANGE = ("09:30:00", "11:29:00")
     PM_RANGE = ("13:00:00", "14:59:00")
 
@@ -920,16 +958,16 @@ class YahooNormalizeCN1min(YahooNormalizeCN, YahooNormalize1minOffline):
         return get_calendar_list("ALL")
 
 
-class YahooNormalizeBR:
+class TushareNormalizeBR:
     def _get_calendar_list(self) -> Iterable[pd.Timestamp]:
         return get_calendar_list("BR_ALL")
 
 
-class YahooNormalizeBR1d(YahooNormalizeBR, YahooNormalize1d):
+class TushareNormalizeBR1d(TushareNormalizeBR, TushareNormalize1d):
     pass
 
 
-class YahooNormalizeBR1min(YahooNormalizeBR, YahooNormalize1minOffline):
+class TushareNormalizeBR1min(TushareNormalizeBR, TushareNormalize1minOffline):
     CALC_PAUSED_NUM = False
 
     def _get_calendar_list(self) -> Iterable[pd.Timestamp]:
@@ -965,11 +1003,11 @@ class Run(BaseRun):
 
     @property
     def collector_class_name(self):
-        return f"YahooCollector{self.region.upper()}{self.interval}"
+        return f"TushareCollector{self.region.upper()}{self.interval}"
 
     @property
     def normalize_class_name(self):
-        return f"YahooNormalize{self.region.upper()}{self.interval}"
+        return f"TushareNormalize{self.region.upper()}{self.interval}"
 
     @property
     def default_base_dir(self) -> [Path, str]:
@@ -1200,7 +1238,7 @@ class Run(BaseRun):
             GetData().qlib_data(target_dir=qlib_data_1d_dir, interval=self.interval, region=self.region)
 
         # download data from yahoo
-        # NOTE: when downloading data from YahooFinance, max_workers is recommended to be 1
+        # NOTE: when downloading data from TushareFinance, max_workers is recommended to be 1
         self.download_data(delay=delay, start=trading_date, end=end_date, check_data_length=check_data_length)
         # NOTE: a larger max_workers setting here would be faster
         self.max_workers = (

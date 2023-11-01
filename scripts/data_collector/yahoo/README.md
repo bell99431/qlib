@@ -58,6 +58,35 @@ pip install -r requirements.txt
     python scripts/get_data.py qlib_data --target_dir ~/.qlib/qlib_data/in_data_1min --region in --interval 1min
     ```
 
+### Collector tushare data to qlib
+
+1. download data to csv:
+          ```bash
+          # cn 1d data
+          python collector.py download_data --source_dir ~/.qlib/stock_data/source/tushare_cn_data --start 2020-01-01 --end 2022-12-31 --delay 1 --interval 1d --region CN
+          # cn 1min data
+          python collector.py download_data --source_dir ~/.qlib/stock_data/source/cn_data_1min --delay 1 --interval 1min --region CN
+
+          # crypto 1d data
+          python collector.py download_data --source_dir ~/.qlib/stock_data/source/crypto_data --start 2017-10-01 --end 2022-12-31 --delay 1 --interval 1d --region CRYPTO
+
+          # us 1d data
+          python collector.py download_data --source_dir ~/.qlib/stock_data/source/us_data --start 2020-01-01 --end 2020-12-31 --delay 1 --interval 1d --region US
+          # us 1min data
+          python collector.py download_data --source_dir ~/.qlib/stock_data/source/us_data_1min --delay 1 --interval 1min --region US
+
+          # in 1d data
+          python collector.py download_data --source_dir ~/.qlib/stock_data/source/in_data --start 2020-01-01 --end 2020-12-31 --delay 1 --interval 1d --region IN
+          # in 1min data
+          python collector.py download_data --source_dir ~/.qlib/stock_data/source/in_data_1min --delay 1 --interval 1min --region IN
+
+          # br 1d data
+          python collector.py download_data --source_dir ~/.qlib/stock_data/source/br_data --start 2003-01-03 --end 2022-03-01 --delay 1 --interval 1d --region BR
+          # br 1min data
+          python collector.py download_data --source_dir ~/.qlib/stock_data/source/br_data_1min --delay 1 --interval 1min --region BR
+          ```
+
+
 ### Collector *YahooFinance* data to qlib
 > collector *YahooFinance* data and *dump* into `qlib` format.
 > If the above ready-made data can't meet users' requirements,  users can follow this section to crawl the latest data and convert it to qlib-data.
@@ -83,6 +112,9 @@ pip install -r requirements.txt
           python collector.py download_data --source_dir ~/.qlib/stock_data/source/cn_data --start 2020-01-01 --end 2020-12-31 --delay 1 --interval 1d --region CN
           # cn 1min data
           python collector.py download_data --source_dir ~/.qlib/stock_data/source/cn_data_1min --delay 1 --interval 1min --region CN
+
+          # crypto 1d data
+          python collector.py download_data --source_dir ~/.qlib/stock_data/source/crypto_data --start 2017-10-01 --end 2023-04-18 --delay 5 --interval 1d --region CRYPTO
 
           # us 1d data
           python collector.py download_data --source_dir ~/.qlib/stock_data/source/us_data --start 2020-01-01 --end 2020-12-31 --delay 1 --interval 1d --region US
@@ -134,6 +166,9 @@ pip install -r requirements.txt
         # normalize 1min cn
         python collector.py normalize_data --qlib_data_1d_dir ~/.qlib/qlib_data/cn_data --source_dir ~/.qlib/stock_data/source/cn_data_1min --normalize_dir ~/.qlib/stock_data/source/cn_1min_nor --region CN --interval 1min
 
+        # normalize 1d crypto
+        python collector.py normalize_data --source_dir ~/.qlib/stock_data/source/crypto_data --normalize_dir ~/.qlib/stock_data/source/crypto_1d_nor --region CRYPTO --interval 1d
+
         # normalize 1d br
         python scripts/data_collector/yahoo/collector.py normalize_data --source_dir ~/.qlib/stock_data/source/br_data --normalize_dir ~/.qlib/stock_data/source/br_1d_nor --region BR --interval 1d
 
@@ -161,6 +196,9 @@ pip install -r requirements.txt
        python dump_bin.py dump_all --csv_path ~/.qlib/stock_data/source/cn_1d_nor --qlib_dir ~/.qlib/qlib_data/cn_data --freq day --exclude_fields date,symbol
        # dump 1min cn
        python dump_bin.py dump_all --csv_path ~/.qlib/stock_data/source/cn_1min_nor --qlib_dir ~/.qlib/qlib_data/cn_data_1min --freq 1min --exclude_fields date,symbol
+
+       # dump 1d crypto
+       python dump_bin.py dump_all --csv_path ~/.qlib/stock_data/source/crypto_1d_nor --qlib_dir ~/.qlib/qlib_data/crypto_data --freq day --exclude_fields date,symbol
        ```
 
 ### Automatic update of daily frequency data(from yahoo finance)

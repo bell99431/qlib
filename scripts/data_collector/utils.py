@@ -22,6 +22,12 @@ from functools import partial
 from concurrent.futures import ProcessPoolExecutor
 from bs4 import BeautifulSoup
 
+# from pycoingecko import CoinGeckoAPI
+
+from requests import Request, Session
+from requests.exceptions import ConnectionError, Timeout, TooManyRedirects
+import json
+
 HS_SYMBOLS_URL = "http://app.finance.ifeng.com/hq/list.php?type=stock_a&class={s_type}"
 
 CALENDAR_URL_BASE = "http://push2his.eastmoney.com/api/qt/stock/kline/get?secid={market}.{bench_code}&fields1=f1%2Cf2%2Cf3%2Cf4%2Cf5&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56%2Cf57%2Cf58&klt=101&fqt=0&beg=19900101&end=20991231"
@@ -46,6 +52,7 @@ _US_SYMBOLS = None
 _IN_SYMBOLS = None
 _BR_SYMBOLS = None
 _EN_FUND_SYMBOLS = None
+_CG_CRYPTO_SYMBOLS = None
 _CALENDAR_MAP = {}
 
 # NOTE: Until 2020-10-20 20:00:00
@@ -222,6 +229,91 @@ def get_hs_stock_symbols() -> list:
 
     return _HS_SYMBOLS
 
+
+def get_cg_crypto_symbols(qlib_data_path: [str, Path] = None) -> list:
+    """get crypto symbols in coingecko
+
+    Returns
+    -------
+        crypto symbols in given exchanges list of coingecko
+    """
+    global _CG_CRYPTO_SYMBOLS
+
+    # @deco_retry
+    # def _get_coingecko():
+    #     try:
+    #         cg = CoinGeckoAPI()
+    #         resp = pd.DataFrame(cg.get_coins_markets(vs_currency="usd"))
+    #     except:
+    #         raise ValueError("request error")
+    #     try:
+    #         _symbols = resp["symbol"].to_list()
+    #         _symbols = [sub + "-usd" for sub in _symbols]
+    #     except Exception as e:
+    #         logger.warning(f"request error: {e}")
+    #         raise
+    #     return _symbols
+
+    @deco_retry
+    def _get_coinmarketcap():
+        """
+            yahoo data is from coinmarket!
+        """
+        try:
+            # url = 'https://sandbox-api.coinmarketcap.com/v1/cryptocurrency/listings/latest'
+            # url = 'https://pro-api.coinmarketcap.com/v1/cryptocurrency/listings/latest'
+            # parameters = {
+            #     'start':'1',
+            #     'limit':'150',
+            #     'convert':'USD'
+            # }
+            # headers = {
+            #     'Accepts': 'application/json',
+            #     'X-CMC_PRO_API_KEY': 'c07ca245-4521-4867-8af9-31f3fd86407e'
+            # }
+
+            # session = Session()
+            # session.headers.update(headers)
+            # response = session.get(url, params=parameters)
+
+            url = "https://pro-api.coinmarketcap.com/v1/cryptocurrency/listings/latest?start=1&limit=150&convert=USD"
+            payload={}
+            headers = {
+            'Accepts': 'application/json',
+            'X-CMC_PRO_API_KEY': 'c07ca245-4521-4867-8af9-31f3fd86407e',
+            'User-Agent': 'Apifox/1.0.0 (https://www.apifox.cn)',
+            'Accept': '*/*',
+            'Host': 'pro-api.coinmarketcap.com',
+            'Connection': 'keep-alive'
+            }
+
+            response = requests.request("GET", url, headers=headers, data=payload)
+            # logger.info(f"response.text:{response.text}")
+            desired_keys = ['name', 'symbol', 'slug', 'date_added', 'max_supply', 'total_supply', 'last_updated']
+            response = json.loads(response.text)
+            data = [{key: x[key] for key in desired_keys} for x in response['data']]
+            data = pd.DataFrame(data)
+            data.rename(columns={'symbol':'ts_code', 'slug':'ename', 'date_added':'list_date'}, inplace=True)
+            data = data[data["ts_code"].apply(lambda x: x.startswith("$")==False)]
+            data = data.drop_duplicates(['ts_code'])
+            resp = data.assign(list_status='L')
+        except Exception as e:
+            logger.warning(f"request error: {e}")
+            raise ValueError("request error")
+        try:
+            _symbols = resp["ts_code"].to_list()
+            _symbols = [sub + "-usd" for sub in _symbols]
+        except Exception as e:
+            logger.warning(f"request error: {e}")
+            raise
+        return _symbols
+
+    if _CG_CRYPTO_SYMBOLS is None:
+        _all_symbols = _get_coinmarketcap()
+
+        _CG_CRYPTO_SYMBOLS = sorted(set(_all_symbols))
+
+    return _CG_CRYPTO_SYMBOLS
 
 def get_us_stock_symbols(qlib_data_path: [str, Path] = None) -> list:
     """get US stock symbols

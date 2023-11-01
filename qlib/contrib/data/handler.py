@@ -138,6 +138,9 @@ class Alpha360vwap(Alpha360):
 
 
 class Alpha158(DataHandlerLP):
+    '''
+        计算30多项指标,每个指标取5个周期的数据作为参考!
+    '''
     def __init__(
         self,
         instruments="csi500",
@@ -151,6 +154,7 @@ class Alpha158(DataHandlerLP):
         process_type=DataHandlerLP.PTYPE_A,
         filter_pipe=None,
         inst_processor=None,
+        drop_raw=False,
         **kwargs,
     ):
         infer_processors = check_transform_proc(infer_processors, fit_start_time, fit_end_time)
@@ -176,6 +180,7 @@ class Alpha158(DataHandlerLP):
             infer_processors=infer_processors,
             learn_processors=learn_processors,
             process_type=process_type,
+            drop_raw=drop_raw,
         )
 
     def get_feature_config(self):
