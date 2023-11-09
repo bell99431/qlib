@@ -141,8 +141,10 @@ class MemCache:
 
         Parameters
         ----------
-        mem_cache_size_limit: cache max size.
-        limit_type: length or sizeof; length(call fun: len), size(call fun: sys.getsizeof).
+        mem_cache_size_limit:
+            cache max size.
+        limit_type:
+            length or sizeof; length(call fun: len), size(call fun: sys.getsizeof).
         """
 
         size_limit = C.mem_cache_size_limit if mem_cache_size_limit is None else mem_cache_size_limit
@@ -394,7 +396,7 @@ class DatasetCache(BaseProviderCache):
 
         .. note:: The server use redis_lock to make sure
             read-write conflicts will not be triggered
-                but client readers are not considered.
+            but client readers are not considered.
         """
         if disk_cache == 0:
             # skip cache
@@ -581,7 +583,6 @@ class DiskExpressionCache(ExpressionCache):
         r.tofile(str(cache_path))
 
     def update(self, sid, cache_uri, freq: str = "day"):
-
         cp_cache_uri = self.get_cache_dir(freq).joinpath(sid).joinpath(cache_uri)
         meta_path = cp_cache_uri.with_suffix(".meta")
         if not self.check_cache_exists(cp_cache_uri, suffix_list=[".meta"]):
@@ -694,7 +695,6 @@ class DiskDatasetCache(DatasetCache):
     def _dataset(
         self, instruments, fields, start_time=None, end_time=None, freq="day", disk_cache=0, inst_processors=[]
     ):
-
         if disk_cache == 0:
             # In this case, data_set cache is configured but will not be used.
             return self.provider.dataset(
@@ -799,7 +799,6 @@ class DiskDatasetCache(DatasetCache):
         KEY = "df"
 
         def __init__(self, cache_path: Union[str, Path]):
-
             self.index_path = cache_path.with_suffix(".index")
             self._data = None
             self.logger = get_module_logger(self.__class__.__name__)
@@ -858,7 +857,7 @@ class DiskDatasetCache(DatasetCache):
         """gen_dataset_cache
 
         .. note:: This function does not consider the cache read write lock. Please
-        Acquire the lock outside this function
+            acquire the lock outside this function
 
         The format the cache contains 3 parts(followed by typical filename).
 
@@ -874,10 +873,10 @@ class DiskDatasetCache(DatasetCache):
                     1999-11-12 00:00:00     2   3
                     ...
 
-            .. note:: The start is closed. The end is open!!!!!
+                .. note:: The start is closed. The end is open!!!!!
 
             - Each line contains two element <start_index, end_index> with a timestamp as its index.
-            - It indicates the `start_index`(included) and `end_index`(excluded) of the data for `timestamp`
+            - It indicates the `start_index` (included) and `end_index` (excluded) of the data for `timestamp`
 
         - meta data: cache/d41366901e25de3ec47297f12e2ba11d.meta
 
@@ -1124,7 +1123,6 @@ class DatasetURICache(DatasetCache):
     def dataset(
         self, instruments, fields, start_time=None, end_time=None, freq="day", disk_cache=0, inst_processors=[]
     ):
-
         if "local" in C.dataset_provider.lower():
             # use LocalDatasetProvider
             return self.provider.dataset(
@@ -1187,7 +1185,6 @@ class MemoryCalendarCache(CalendarCache):
         uri = self._uri(start_time, end_time, freq, future)
         result, expire = MemCacheExpire.get_cache(H["c"], uri)
         if result is None or expire:
-
             result = self.provider.calendar(start_time, end_time, freq, future)
             MemCacheExpire.set_cache(H["c"], uri, result)
 

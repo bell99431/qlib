@@ -24,8 +24,8 @@ The introduction of ``Data Layer`` includes the following parts.
 Here is a typical example of Qlib data workflow
 
 - Users download data and converting data into Qlib format(with filename suffix `.bin`).  In this step, typically only some basic data are stored on disk(such as OHLCV).
-- Creating some basic features based on Qlib's expression Engine(e.g. "Ref($close, 60) / $close", the return of last 60 trading days). Supported operators in the expression engine can be found `here <https://github.com/microsoft/qlib/blob/main/qlib/data/ops.py>`_. This step is typically implemented in Qlib's `Data Loader <https://qlib.readthedocs.io/en/latest/component/data.html#data-loader>`_ which is a component of `Data Handler <https://qlib.readthedocs.io/en/latest/component/data.html#data-handler>`_ .
-- If users require more complicated data processing (e.g. data normalization),  `Data Handler <https://qlib.readthedocs.io/en/latest/component/data.html#data-handler>`_ support user-customized processors to process data(some predefined processors can be found `here <https://github.com/microsoft/qlib/blob/main/qlib/data/dataset/processor.py>`_).  The processors are different from operators in expression engine. It is designed for some complicated data processing methods which is hard to supported in operators in expression engine.
+- Creating some basic features based on Qlib's expression Engine(e.g. "Ref($close, 60) / $close", the return of last 60 trading days). Supported operators in the expression engine can be found `here <https://github.com/microsoft/qlib/blob/main/qlib/data/ops.py>`__. This step is typically implemented in Qlib's `Data Loader <https://qlib.readthedocs.io/en/latest/component/data.html#data-loader>`_ which is a component of `Data Handler <https://qlib.readthedocs.io/en/latest/component/data.html#data-handler>`_ .
+- If users require more complicated data processing (e.g. data normalization),  `Data Handler <https://qlib.readthedocs.io/en/latest/component/data.html#data-handler>`_ support user-customized processors to process data(some predefined processors can be found `here <https://github.com/microsoft/qlib/blob/main/qlib/data/dataset/processor.py>`__).  The processors are different from operators in expression engine. It is designed for some complicated data processing methods which is hard to supported in operators in expression engine.
 - At last, `Dataset <https://qlib.readthedocs.io/en/latest/component/data.html#dataset>`_ is responsible to prepare model-specific dataset from the processed data of Data Handler
 
 Data Preparation
@@ -37,7 +37,7 @@ Qlib Format Data
 We've specially designed a data structure to manage financial data, please refer to the `File storage design section in Qlib paper <https://arxiv.org/abs/2009.11189>`_ for detailed information.
 Such data will be stored with filename suffix `.bin` (We'll call them `.bin` file, `.bin` format, or qlib format). `.bin` file is designed for scientific computing on finance data.
 
-``Qlib`` provides two different off-the-shelf datasets, which can be accessed through this `link <https://github.com/microsoft/qlib/blob/main/qlib/contrib/data/handler.py>`_:
+``Qlib`` provides two different off-the-shelf datasets, which can be accessed through this `link <https://github.com/microsoft/qlib/blob/main/qlib/contrib/data/handler.py>`__:
 
 ========================  =================  ================
 Dataset                   US Market          China Market
@@ -47,7 +47,7 @@ Alpha360                  √                  √
 Alpha158                  √                  √
 ========================  =================  ================
 
-Also, ``Qlib`` provides a high-frequency dataset. Users can run a high-frequency dataset example through this `link <https://github.com/microsoft/qlib/tree/main/examples/highfreq>`_.
+Also, ``Qlib`` provides a high-frequency dataset. Users can run a high-frequency dataset example through this `link <https://github.com/microsoft/qlib/tree/main/examples/highfreq>`__.
 
 Qlib Format Dataset
 -------------------
@@ -119,7 +119,7 @@ Here are some example:
 for daily data:
   .. code-block:: bash
 
-    python scripts/get_data.py csv_data_cn --target_dir ~/.qlib/csv_data/cn_data
+    python scripts/get_data.py download_data --file_name csv_data_cn.zip --target_dir ~/.qlib/csv_data/cn_data
 
 for 1min data:
   .. code-block:: bash
@@ -140,10 +140,11 @@ Users can also provide their own data in CSV format. However, the CSV data **mus
 
         where the data are in the following format:
 
-        .. code-block::
-
-            symbol,close
-            SH600000,120
+            +-----------+-------+
+            | symbol    | close |
+            +===========+=======+
+            | SH600000  | 120   |
+            +-----------+-------+
 
 - CSV file **must** includes a column for the date, and when dumping the data, user must specify the date column name. Here is an example:
 
@@ -153,11 +154,13 @@ Users can also provide their own data in CSV format. However, the CSV data **mus
 
     where the data are in the following format:
 
-    .. code-block::
-
-        symbol,date,close,open,volume
-        SH600000,2020-11-01,120,121,12300000
-        SH600000,2020-11-02,123,120,12300000
+        +---------+------------+-------+------+----------+
+        | symbol  | date       | close | open | volume   |
+        +=========+============+=======+======+==========+
+        | SH600000| 2020-11-01 | 120   | 121  | 12300000 |
+        +---------+------------+-------+------+----------+
+        | SH600000| 2020-11-02 | 123   | 120  | 12300000 |
+        +---------+------------+-------+------+----------+
 
 
 Supposed that users prepare their CSV format data in the directory ``~/.qlib/csv_data/my_data``, they can run the following command to start the conversion.
@@ -332,6 +335,7 @@ Here are some interfaces of the ``QlibDataLoader`` class:
 
 .. autoclass:: qlib.data.dataset.loader.DataLoader
     :members:
+    :noindex:
 
 API
 ---
@@ -361,6 +365,7 @@ Here are some important interfaces that ``DataHandlerLP`` provides:
 
 .. autoclass:: qlib.data.dataset.handler.DataHandlerLP
     :members: __init__, fetch, get_cols
+    :noindex:
 
 
 If users want to load features and labels by config, users can define a new handler and call the static method `parse_config_to_fields` of ``qlib.contrib.data.handler.Alpha158``.
@@ -451,6 +456,7 @@ The ``DatasetH`` class is the `dataset` with `Data Handler`. Here is the most im
 
 .. autoclass:: qlib.data.dataset.__init__.DatasetH
     :members:
+    :noindex:
 
 API
 ---
@@ -470,9 +476,11 @@ Global Memory Cache
 
 .. autoclass:: qlib.data.cache.MemCacheUnit
     :members:
+    :noindex:
 
 .. autoclass:: qlib.data.cache.MemCache
     :members:
+    :noindex:
 
 
 ExpressionCache
@@ -487,6 +495,7 @@ The following shows the details about the interfaces:
 
 .. autoclass:: qlib.data.cache.ExpressionCache
     :members:
+    :noindex:
 
 ``Qlib`` has currently provided implemented disk cache `DiskExpressionCache` which inherits from `ExpressionCache` . The expressions data will be stored in the disk.
 
@@ -502,6 +511,7 @@ The following shows the details about the interfaces:
 
 .. autoclass:: qlib.data.cache.DatasetCache
     :members:
+    :noindex:
 
 ``Qlib`` has currently provided implemented disk cache `DiskDatasetCache` which inherits from `DatasetCache` . The datasets' data will be stored in the disk.
 
@@ -512,7 +522,7 @@ Data and Cache File Structure
 
 We've specially designed a file structure to manage data and cache, please refer to the `File storage design section in Qlib paper <https://arxiv.org/abs/2009.11189>`_ for detailed information. The file structure of data and cache is listed as follows.
 
-.. code-block:: json
+.. code-block::
 
     - data/
         [raw data] updated by data providers

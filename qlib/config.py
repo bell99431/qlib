@@ -75,7 +75,8 @@ class Config:
     def set_conf_from_C(self, config_c):
         self.update(**config_c.__dict__["_config"])
 
-    def register_from_C(self, config, skip_register=True):
+    @staticmethod
+    def register_from_C(config, skip_register=True):
         from .utils import set_log_with_config  # pylint: disable=C0415
 
         if C.registered and skip_register:
@@ -146,6 +147,7 @@ _default_config = {
     "redis_host": "127.0.0.1",
     "redis_port": 6379,
     "redis_task_db": 1,
+    "redis_password": None,
     # This value can be reset via qlib.init
     "logging_level": logging.INFO,
     # Global configuration of qlib log
@@ -202,7 +204,7 @@ _default_config = {
         "task_url": "mongodb://localhost:27017/",
         "task_db_name": "default_task_db",
     },
-    # Shift minute for highfreq minite data, used in backtest
+    # Shift minute for highfreq minute data, used in backtest
     # if min_data_shift == 0, use default market time [9:30, 11:29, 1:00, 2:59]
     # if min_data_shift != 0, use shifted market time [9:30, 11:29, 1:00, 2:59] - shift*minute
     "min_data_shift": 0,
@@ -296,7 +298,6 @@ class QlibConfig(Config):
         """
 
         def __init__(self, provider_uri: Union[str, Path, dict], mount_path: Union[str, Path, dict]):
-
             """
             The relation of `provider_uri` and `mount_path`
             - `mount_path` is used only if provider_uri is an NFS path
@@ -416,8 +417,7 @@ class QlibConfig(Config):
         if _logging_config:
             set_log_with_config(_logging_config)
 
-        # FIXME: this logger ignored the level in config
-        logger = get_module_logger("Initialization", level=logging.INFO)
+        logger = get_module_logger("Initialization", kwargs.get("logging_level", self.logging_level))
         logger.info(f"default_conf: {default_conf}.")
 
         self.set_mode(default_conf)

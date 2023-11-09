@@ -94,7 +94,9 @@ def handler_mod(task: dict, rolling_gen):
     """
     Help to modify the handler end time when using RollingGen
     It try to handle the following case
+
     - Hander's data end_time is earlier than  dataset's test_data's segments.
+
         - To handle this, handler's data's end_time is extended.
 
     If the handler's end_time is None, then it is not necessary to change it's end time.
@@ -337,7 +339,6 @@ class MultiHorizonGenBase(TaskGen):
     def generate(self, task: dict):
         res = []
         for hr in self.horizon:
-
             # Add horizon
             t = copy.deepcopy(task)
             self.set_horizon(t, hr)

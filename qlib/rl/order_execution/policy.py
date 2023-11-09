@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, Generator, Iterable, Optional, Tuple, cast
+from typing import Any, Dict, Generator, Iterable, Optional, OrderedDict, Tuple, cast
 
 import gym
 import numpy as np
@@ -12,9 +12,11 @@ import torch
 import torch.nn as nn
 from gym.spaces import Discrete
 from tianshou.data import Batch, ReplayBuffer, to_torch
-from tianshou.policy import BasePolicy, PPOPolicy
+from tianshou.policy import BasePolicy, PPOPolicy, DQNPolicy
 
-__all__ = ["AllOne", "PPO"]
+from qlib.rl.trainer.trainer import Trainer
+
+__all__ = ["AllOne", "PPO", "DQN"]
 
 
 # baselines #
@@ -30,7 +32,7 @@ class NonLearnablePolicy(BasePolicy):
         super().__init__()
 
     def learn(self, batch: Batch, **kwargs: Any) -> Dict[str, Any]:
-        pass
+        return {}
 
     def process_fn(
         self,
@@ -38,7 +40,7 @@ class NonLearnablePolicy(BasePolicy):
         buffer: ReplayBuffer,
         indices: np.ndarray,
     ) -> Batch:
-        pass
+        return Batch({})
 
 
 class AllOne(NonLearnablePolicy):
@@ -47,13 +49,18 @@ class AllOne(NonLearnablePolicy):
     Useful when implementing some baselines (e.g., TWAP).
     """
 
+    def __init__(self, obs_space: gym.Space, action_space: gym.Space, fill_value: float | int = 1.0) -> None:
+        super().__init__(obs_space, action_space)
+
+        self.fill_value = fill_value
+
     def forward(
         self,
         batch: Batch,
         state: dict | Batch | np.ndarray = None,
         **kwargs: Any,
     ) -> Batch:
-        return Batch(act=np.full(len(batch), 1.0), state=state)
+        return Batch(act=np.full(len(batch), self.fill_value), state=state)
 
 
 # ppo #
@@ -148,7 +155,57 @@ class PPO(PPOPolicy):
             action_space=action_space,
         )
         if weight_file is not None:
-            load_weight(self, weight_file)
+            set_weight(self, Trainer.get_policy_state_dict(weight_file))
+
+
+DQNModel = PPOActor  # Reuse PPOActor.
+
+
+class DQN(DQNPolicy):
+    """A wrapper of tianshou DQNPolicy.
+
+    Differences:
+
+    - Auto-create model network. Supports discrete action space only.
+    - Support a ``weight_file`` that supports loading checkpoint.
+    """
+
+    def __init__(
+        self,
+        network: nn.Module,
+        obs_space: gym.Space,
+        action_space: gym.Space,
+        lr: float,
+        weight_decay: float = 0.0,
+        discount_factor: float = 0.99,
+        estimation_step: int = 1,
+        target_update_freq: int = 0,
+        reward_normalization: bool = False,
+        is_double: bool = True,
+        clip_loss_grad: bool = False,
+        weight_file: Optional[Path] = None,
+    ) -> None:
+        assert isinstance(action_space, Discrete)
+
+        model = DQNModel(network, action_space.n)
+        optimizer = torch.optim.Adam(
+            model.parameters(),
+            lr=lr,
+            weight_decay=weight_decay,
+        )
+
+        super().__init__(
+            model,
+            optimizer,
+            discount_factor=discount_factor,
+            estimation_step=estimation_step,
+            target_update_freq=target_update_freq,
+            reward_normalization=reward_normalization,
+            is_double=is_double,
+            clip_loss_grad=clip_loss_grad,
+        )
+        if weight_file is not None:
+            set_weight(self, Trainer.get_policy_state_dict(weight_file))
 
 
 # utilities: these should be put in a separate (common) file. #
@@ -160,15 +217,7 @@ def auto_device(module: nn.Module) -> torch.device:
     return torch.device("cpu")  # fallback to cpu
 
 
-def load_weight(policy: nn.Module, path: Path) -> None:
-    assert isinstance(policy, nn.Module), "Policy has to be an nn.Module to load weight."
-    loaded_weight = torch.load(path, map_location="cpu")
-
-    # TODO: this should be handled by whoever calls load_weight.
-    # TODO: For example, when the outer class receives a weight, it should first unpack it,
-    # TODO: and send the corresponding part to individual component.
-    if "vessel" in loaded_weight:
-        loaded_weight = loaded_weight["vessel"]["policy"]
+def set_weight(policy: nn.Module, loaded_weight: OrderedDict) -> None:
     try:
         policy.load_state_dict(loaded_weight)
     except RuntimeError:
