@@ -60,7 +60,7 @@ REQUIRED = [
     "xlrd>=1.0.0",
     "plotly>=4.12.0",
     "matplotlib>=3.3",
-    "tables>=3.6.1",
+    "tables==3.8.0",
     "pyyaml>=5.3.1",
     # To ensure stable operation of the experiment manager, we have limited the version of mlflow,
     # and we need to verify whether version 2.0 of mlflow can serve qlib properly.
