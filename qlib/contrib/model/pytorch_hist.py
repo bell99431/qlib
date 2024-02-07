@@ -286,7 +286,7 @@ class HIST(Model):
 
         if self.model_path is not None:
             self.logger.info("Loading pretrained model...")
-            pretrained_model.load_state_dict(torch.load(self.model_path))
+            pretrained_model.load_state_dict(torch.load(self.model_path, map_location=torch.device('cpu')))
 
         model_dict = self.HIST_model.state_dict()
         pretrained_dict = {
@@ -429,7 +429,8 @@ class HISTModel(nn.Module):
         return cos_similarity
 
     def forward(self, x, concept_matrix):
-        device = torch.device(torch.get_device(x))
+        # device = torch.device(torch.get_device(x))
+        device = torch.device("cpu")
 
         x_hidden = x.reshape(len(x), self.d_feat, -1)  # [N, F, T]
         x_hidden = x_hidden.permute(0, 2, 1)  # [N, T, F]

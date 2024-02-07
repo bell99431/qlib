@@ -70,7 +70,7 @@ REQUIRED = [
     "lightgbm>=3.3.0",
     "tornado",
     "joblib>=0.17.0",
-    "ruamel.yaml>=0.16.12",
+    "ruamel.yaml==0.17.21",
     "pymongo==3.7.2",  # For task management
     "scikit-learn>=0.22",
     "dill",
