@@ -71,7 +71,8 @@ REQUIRED = [
     "tornado",
     "joblib>=0.17.0",
     "ruamel.yaml==0.17.21",
-    "pymongo==3.7.2",  # For task management
+    # "pymongo==3.7.2",  # For task management
+    "pymongo==4.6.1",  # For task management
     "scikit-learn>=0.22",
     "dill",
     "dataclasses;python_version<'3.7'",

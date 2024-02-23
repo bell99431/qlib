@@ -149,7 +149,8 @@ _default_config = {
     "redis_task_db": 1,
     "redis_password": None,
     # This value can be reset via qlib.init
-    "logging_level": logging.INFO,
+    # "logging_level": logging.INFO,
+    "logging_level": logging.WARN,
     # Global configuration of qlib log
     # logging_level can control the logging level more finely
     "logging_config": {
@@ -168,12 +169,12 @@ _default_config = {
         "handlers": {
             "console": {
                 "class": "logging.StreamHandler",
-                "level": logging.DEBUG,
+                "level": logging.WARN,
                 "formatter": "logger_format",
                 "filters": ["field_not_found"],
             }
         },
-        "loggers": {"qlib": {"level": logging.DEBUG, "handlers": ["console"]}},
+        "loggers": {"qlib": {"level": logging.WARN, "handlers": ["console"]}},
         # To let qlib work with other packages, we shouldn't disable existing loggers.
         # Note that this param is default to True according to the documentation of logging.
         "disable_existing_loggers": False,
@@ -239,7 +240,7 @@ MODE_CONF = {
         # The nfs should be auto-mounted by qlib on other
         # serversS(such as PAI) [auto_mount:True]
         "timeout": 100,
-        "logging_level": logging.INFO,
+        "logging_level": logging.WARN,
         "region": REG_CN,
         # custom operator
         # each element of custom_ops should be Type[ExpressionOps] or dict
@@ -416,7 +417,7 @@ class QlibConfig(Config):
         # set global config
         if _logging_config:
             set_log_with_config(_logging_config)
-
+        # print(_logging_config)
         logger = get_module_logger("Initialization", kwargs.get("logging_level", self.logging_level))
         logger.info(f"default_conf: {default_conf}.")
 

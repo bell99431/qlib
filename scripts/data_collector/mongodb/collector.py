@@ -11,7 +11,7 @@ from pathlib import Path
 import fire
 import requests
 import pandas as pd
-from binance.spot import Spot
+# from mongo.spot import Spot
 from loguru import logger
 from dateutil.tz import tzlocal
 
@@ -28,78 +28,45 @@ from typing import Iterable
 import copy
 import numpy as np
 import pandas as pd
+import pymongo
+from pymongo import MongoClient
+from pymongo.database import Database
+import os
 
 _CG_CRYPTO_SYMBOLS = None
-client = Spot()
+DB_CONN:MongoClient
+DB:Database # = to_conn[DB_NAME]
+DB_NAME = "cmc"
+DB_KLINE_NAME = "cmc_klines"
+DB_ADDRESS = "mongodb://center-mongodb:27017/"
 
-def get_binance_symbols(qlib_data_path: [str, Path] = None) -> list:
-    """get crypto symbols in coingecko
+DOWNLOAD_URL = Path('~/.qlib/stock_data/source/crypto_mongo').expanduser()
+CSV_PATH = Path('~/.qlib/stock_data/target/crypto_mongo_list.csv').expanduser()
+
+def get_mongo_symbols(qlib_data_path: [str, Path] = None) -> list:
+    """get crypto symbols in mongo
 
     Returns
     -------
-        crypto symbols in given exchanges list of coingecko
+        ['bitcoin','dogecoin']
     """
-    global _CG_CRYPTO_SYMBOLS
-
-    @deco_retry
-    def _get_coinmarketcap():
-        """
-            从coinmarket获取数据,其对token是按照交易量进行排序的,更有参考价值.
-            如果需要获取币安所有现货数据的话,可以采用币安的数据更优, client.exchange_info(permissions=["SPOT"])
-        """
-        
-        try:
-            #limit可以控制数量
-            url = "https://pro-api.coinmarketcap.com/v1/cryptocurrency/listings/latest?start=1&limit=200&convert=USD"
-            payload={}
-            headers = {
-            'Accepts': 'application/json',
-            'X-CMC_PRO_API_KEY': 'c07ca245-4521-4867-8af9-31f3fd86407e'
-            }
-
-            response = requests.request("GET", url, headers=headers, data=payload)
-
-            # logger.info(f"response.text:{response.text}")
-            desired_keys = ['name', 'symbol', 'slug', 'date_added', 'max_supply', 'total_supply', 'last_updated']
-            response = json.loads(response.text)
-            data = [{key: x[key] for key in desired_keys} for x in response['data']]
-            data = pd.DataFrame(data)
-            data.rename(columns={'symbol':'ts_code', 'slug':'ename', 'date_added':'list_date'}, inplace=True)
-            data = data[data["ts_code"].apply(lambda x: x.startswith("$")==False)]
-            data = data.drop_duplicates(['ts_code'])
-            resp = data.assign(list_status='L')
-        except Exception as e:
-            logger.warning(f"request error: {e}")
-            raise ValueError("request error")
-        try:
-            # logger.info(f"response:{resp}")
-            # resp.filter(like="USD")
-            resp.drop(resp[resp['ts_code'].str.contains('USD')].index, inplace=True)
-            # logger.info(f"response2:{resp}")
-            _symbols = resp["ts_code"].to_list()
-            _symbols = [sub + "-USDT" for sub in _symbols]
-        except Exception as e:
-            logger.warning(f"request error: {e}")
-            raise
-        return _symbols
+    global _CG_CRYPTO_SYMBOLS, DB_CONN, DB_NAME
 
     if _CG_CRYPTO_SYMBOLS is None:
-        _all_symbols = _get_coinmarketcap()
-
-        _CG_CRYPTO_SYMBOLS = sorted(set(_all_symbols))
-        logger.info(_CG_CRYPTO_SYMBOLS)
-
+        stock_list = pd.read_csv(CSV_PATH)
+        _CG_CRYPTO_SYMBOLS = stock_list['enname'].to_list()
+        # print(_CG_CRYPTO_SYMBOLS)
     return _CG_CRYPTO_SYMBOLS
 
 
-class BinanceCollector(BaseCollector):
+class MongoCollector(BaseCollector):
     def __init__(
         self,
         save_dir: [str, Path],
         start=None,
         end=None,
         interval="1d",
-        max_workers=1,
+        max_workers=16,
         max_collector_count=2,
         delay=1,  # delay need to be one
         check_data_length: int = None,
@@ -128,7 +95,11 @@ class BinanceCollector(BaseCollector):
         limit_nums: int
             using for debug, by default None
         """
-        super(BinanceCollector, self).__init__(
+        # 强制设置多线程处理
+        # max_workers = 16
+        print(f'init MongoCollector max_workers: {max_workers}')
+        self.init_mongo_db()
+        super(MongoCollector, self).__init__(
             save_dir=save_dir,
             start=start,
             end=end,
@@ -153,6 +124,15 @@ class BinanceCollector(BaseCollector):
         self.start_datetime = self.convert_datetime(self.start_datetime, self._timezone)
         self.end_datetime = self.convert_datetime(self.end_datetime, self._timezone)
 
+    def init_mongo_db(self):
+        global DB_CONN, DB, DB_ADDRESS
+        env = os.environ.get("DEV_ENV")
+        if env and env=='dev':
+            DB_ADDRESS = 'mongodb://178.157.57.88:17000/'
+        DB_CONN = pymongo.MongoClient(DB_ADDRESS)
+        self.db = DB_CONN[DB_KLINE_NAME]
+        self.dowload_url = DOWNLOAD_URL
+
     @staticmethod
     def convert_datetime(dt: [pd.Timestamp, datetime.date, str], timezone):
         try:
@@ -167,42 +147,48 @@ class BinanceCollector(BaseCollector):
     def _timezone(self):
         raise NotImplementedError("rewrite get_timezone")
 
-    @staticmethod
-    def get_data_from_remote(symbol, interval, start, end):
+    def get_data(
+        self, symbol: str, interval: str, start: pd.Timestamp, end: pd.Timestamp
+    ) -> [pd.DataFrame]:
+        '''
+        数据获取逻辑
+        '''
+        # 获取已有数据的最新时间,
+        # return None
         error_msg = f"{symbol}-{interval}-{start}-{end}"
         try:
-            if interval != BinanceCollector.INTERVAL_1d:
+            if interval != MongoCollector.INTERVAL_1d:
                 raise ValueError(f"cannot support {interval}")
             
             freq = "1d" 
-            startTime = int(round(start.timestamp() * 1000))
-            endTime = int(round(end.timestamp() * 1000))
-            bSymbol = symbol.replace("-", "")
-            # 这里得拆分成N份,每份1000条数据!
-            day1000 = 3600*24*1000*1000
-            curTime = startTime
-            _resp = []
-            while startTime<=endTime:
-                curTime = curTime + day1000
-                if curTime>endTime:
-                    curTime = endTime
-                # print("time", startTime, curTime, endTime)
-                _respClip = client.klines(symbol=bSymbol, interval=freq, startTime=startTime, endTime=curTime, limit=1000)
-                # print(_respClip)
-                _resp.extend(_respClip)
-                startTime = curTime + 1
+            start_time = 0
+            try:
+                old_data = pd.read_csv(self.dowload_url.joinpath(f'{symbol}.csv'))
+                if not old_data.empty:
+                    date_string = old_data['date'].max()
+                    date_obj = datetime.datetime.strptime(date_string, "%Y-%m-%d")
+                    start_time = int(round(date_obj.timestamp()))
+                    # print(f'{symbol} latest date: {date_string}')
+            except Exception as e:
+                # print(e)
+                pass
+            # 返回数据格式:symbol,date,open,high,low,close,volume,adjclose,factor
+            data = self.db[f'cc_kline_{symbol}'].find(
+                {
+                    "interval":freq,
+                    "timeOpen":{"$gt":start_time}
+                },
+                projection={'_id': 0, 'date':'$timeOpen', 'open':1, 'high':1, 'low':1, 'close':1, 'volume':1}
+            )
+            data = pd.DataFrame(list(data))
+            # print(data)
 
-            # _resp = client.klines(symbol=bSymbol, interval=freq, startTime=startTime, endTime=endTime, limit=1000)
-            data = pd.DataFrame.from_records(_resp, columns=['date','open', 'high', 'low', 'close', 'volume', 'closeTime', 'tradeVolume', 'count', 'buyVolume', 'buyTradeVolume', 'reserved'])
-            data.drop(columns=['closeTime', 'tradeVolume', 'count', 'buyVolume', 'buyTradeVolume', 'reserved'], inplace=True)
             data['symbol'] = symbol
             data['adjclose'] = data['close'] 
             data['factor'] = 1  # = data['adjclose']/data['close']
             # print(data)
-            # time.localtime()
-            # pd.to_datetime()
             def func(x):
-                t = time.localtime(x/1000)
+                t = time.localtime(x)
                 return time.strftime('%Y-%m-%d', t)
             data['date'] = data['date'].apply(lambda x: func(x))
 
@@ -212,30 +198,13 @@ class BinanceCollector(BaseCollector):
         except Exception as e:
             logger.warning(f"{error_msg}:{e}")
 
-    def get_data(
-        self, symbol: str, interval: str, start_datetime: pd.Timestamp, end_datetime: pd.Timestamp
-    ) -> [pd.DataFrame]:
-        def _get_simple(start_, end_):
-            self.sleep()
-            _remote_interval = interval
-            return self.get_data_from_remote(
-                symbol,
-                interval=_remote_interval,
-                start=start_,
-                end=end_,
-            )
+class MongoCollector1d(MongoCollector, ABC):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
-        if interval == self.INTERVAL_1d:
-            _result = _get_simple(start_datetime, end_datetime)
-        else:
-            raise ValueError(f"cannot support {interval}")
-        return _result
-
-
-class BinanceCollector1d(BinanceCollector, ABC):
     def get_instrument_list(self):
         logger.info("get symbols......")
-        symbols = get_binance_symbols()
+        symbols = get_mongo_symbols()
         logger.info(f"get {len(symbols)} symbols.")
         return symbols
 
@@ -246,101 +215,7 @@ class BinanceCollector1d(BinanceCollector, ABC):
     def _timezone(self):
         return "Asia/Shanghai"
 
-
-# class BinanceNormalize(BaseNormalize):
-#     DAILY_FORMAT = "%Y-%m-%d"
-
-#     @staticmethod
-#     def _normalize_(
-#         df: pd.DataFrame,
-#         calendar_list: list = None,
-#         date_field_name: str = "trade_date",
-#         symbol_field_name: str = "symbol",
-#     ):
-#         if df.empty:
-#             return df
-#         df = df.copy()
-#         df.set_index(date_field_name, inplace=True)
-#         df.index = pd.to_datetime(df.index)
-#         df = df[~df.index.duplicated(keep="first")]
-#         if calendar_list is not None:
-#             df = df.reindex(
-#                 pd.DataFrame(index=calendar_list)
-#                 .loc[
-#                     pd.Timestamp(df.index.min()).date() : pd.Timestamp(df.index.max()).date()
-#                     + pd.Timedelta(hours=23, minutes=59)
-#                 ]
-#                 .index
-#             )
-#         df.sort_index(inplace=True)
-
-#         df.index.names = [date_field_name]
-#         return df.reset_index()
-
-#     def normalize(self, df: pd.DataFrame) -> pd.DataFrame:
-#         df = self._normalize_(df, self._calendar_list, self._date_field_name, self._symbol_field_name)
-#         return df
-
-
-# class BinanceNormalize1d(BinanceNormalize):
-#     def _get_calendar_list(self):
-#         return None
-    
-#     def adjusted_price(self, df: pd.DataFrame) -> pd.DataFrame:
-#         if df.empty:
-#             return df
-#         df = df.copy()
-#         df.set_index(self._date_field_name, inplace=True)
-#         if "adjclose" in df:
-#             df["factor"] = df["adjclose"] / df["close"]
-#             df["factor"] = df["factor"].fillna(method="ffill")
-#         else:
-#             df["factor"] = 1
-#         for _col in self.COLUMNS:
-#             if _col not in df.columns:
-#                 continue
-#             if _col == "volume":
-#                 df[_col] = df[_col] / df["factor"]
-#             else:
-#                 df[_col] = df[_col] * df["factor"]
-#         df.index.names = [self._date_field_name]
-#         return df.reset_index()
-
-#     def normalize(self, df: pd.DataFrame) -> pd.DataFrame:
-#         df = super(BinanceNormalize1d, self).normalize(df)
-#         df = self._manual_adj_data(df)
-#         return df
-
-#     def _get_first_close(self, df: pd.DataFrame) -> float:
-#         """get first close value
-
-#         Notes
-#         -----
-#             For incremental updates(append) to Yahoo 1D data, user need to use a close that is not 0 on the first trading day of the existing data
-#         """
-#         df = df.loc[df["close"].first_valid_index() :]
-#         _close = df["close"].iloc[0]
-#         return _close
-
-#     def _manual_adj_data(self, df: pd.DataFrame) -> pd.DataFrame:
-#         """manual adjust data: All fields (except change) are standardized according to the close of the first day"""
-#         if df.empty:
-#             return df
-#         df = df.copy()
-#         df.sort_values(self._date_field_name, inplace=True)
-#         df = df.set_index(self._date_field_name)
-#         _close = self._get_first_close(df)
-#         for _col in df.columns:
-#             # NOTE: retain original adjclose, required for incremental updates
-#             if _col in [self._symbol_field_name, "adjclose", "change"]:
-#                 continue
-#             if _col == "volume":
-#                 df[_col] = df[_col] * _close
-#             else:
-#                 df[_col] = df[_col] / _close
-#         return df.reset_index()
-
-class BinanceNormalize(BaseNormalize):
+class MongoNormalize(BaseNormalize):
     COLUMNS = ["open", "close", "high", "low", "volume"]
     DAILY_FORMAT = "%Y-%m-%d"
 
@@ -355,7 +230,7 @@ class BinanceNormalize(BaseNormalize):
         return change_series
 
     @staticmethod
-    def normalize_binance(
+    def normalize_mongo(
         df: pd.DataFrame,
         calendar_list: list = None,
         date_field_name: str = "date",
@@ -365,7 +240,7 @@ class BinanceNormalize(BaseNormalize):
         if df.empty:
             return df
         symbol = df.loc[df[symbol_field_name].first_valid_index(), symbol_field_name]
-        columns = copy.deepcopy(BinanceNormalize.COLUMNS)
+        columns = copy.deepcopy(MongoNormalize.COLUMNS)
         df = df.copy()
         df.set_index(date_field_name, inplace=True)
         df.index = pd.to_datetime(df.index)
@@ -382,14 +257,14 @@ class BinanceNormalize(BaseNormalize):
         df.sort_index(inplace=True)
         df.loc[(df["volume"] <= 0) | np.isnan(df["volume"]), list(set(df.columns) - {symbol_field_name})] = np.nan
 
-        change_series = BinanceNormalize.calc_change(df, last_close)
+        change_series = MongoNormalize.calc_change(df, last_close)
         # NOTE: The data obtained by Yahoo finance sometimes has exceptions
         # WARNING: If it is normal for a `symbol(exchange)` to differ by a factor of *89* to *111* for consecutive trading days,
         # WARNING: the logic in the following line needs to be modified
         _count = 0
         while True:
             # NOTE: may appear unusual for many days in a row
-            change_series = BinanceNormalize.calc_change(df, last_close)
+            change_series = MongoNormalize.calc_change(df, last_close)
             _mask = (change_series >= 89) & (change_series <= 111)
             if not _mask.any():
                 break
@@ -402,7 +277,7 @@ class BinanceNormalize(BaseNormalize):
                     f"{_symbol} `change` is abnormal for {_count} consecutive days, please check the specific data file carefully"
                 )
 
-        df["change"] = BinanceNormalize.calc_change(df, last_close)
+        df["change"] = MongoNormalize.calc_change(df, last_close)
 
         columns += ["change"]
         df.loc[(df["volume"] <= 0) | np.isnan(df["volume"]), columns] = np.nan
@@ -413,7 +288,7 @@ class BinanceNormalize(BaseNormalize):
 
     def normalize(self, df: pd.DataFrame) -> pd.DataFrame:
         # normalize
-        df = self.normalize_binance(df, self._calendar_list, self._date_field_name, self._symbol_field_name)
+        df = self.normalize_mongo(df, self._calendar_list, self._date_field_name, self._symbol_field_name)
         # adjusted price
         df = self.adjusted_price(df)
         return df
@@ -424,7 +299,7 @@ class BinanceNormalize(BaseNormalize):
         raise NotImplementedError("rewrite adjusted_price")
 
 
-class BinanceNormalize1d(BinanceNormalize, ABC):
+class MongoNormalize1d(MongoNormalize, ABC):
     DAILY_FORMAT = "%Y-%m-%d"
 
     def _get_calendar_list(self) -> Iterable[pd.Timestamp]:
@@ -450,7 +325,7 @@ class BinanceNormalize1d(BinanceNormalize, ABC):
         return df.reset_index()
 
     def normalize(self, df: pd.DataFrame) -> pd.DataFrame:
-        df = super(BinanceNormalize1d, self).normalize(df)
+        df = super(MongoNormalize1d, self).normalize(df)
         df = self._manual_adj_data(df)
         return df
 
@@ -503,11 +378,11 @@ class Run(BaseRun):
 
     @property
     def collector_class_name(self):
-        return f"BinanceCollector{self.interval}"
+        return f"MongoCollector{self.interval}"
 
     @property
     def normalize_class_name(self):
-        return f"BinanceNormalize{self.interval}"
+        return f"MongoNormalize{self.interval}"
 
     @property
     def default_base_dir(self) -> [Path, str]:
@@ -570,7 +445,7 @@ def hello(name="World"):
 
 if __name__ == "__main__":
     fire.Fire(Run)
-    # get_binance_symbols()
+    # get_mongo_symbols()
     # response = client.exchange_info(permissions=["SPOT"])
     # response = client.exchange_info(symbols=['BTCUSDT', 'DOGEUSDT'])
     # logger.info(response)

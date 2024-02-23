@@ -13,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 import pandas as pd
 from tqdm import tqdm
 from loguru import logger
-from joblib import Parallel, delayed
+from joblib import Parallel, delayed, parallel_backend
 from qlib.utils import code_to_fname
 
 
@@ -140,6 +140,8 @@ class BaseCollector(abc.ABC):
         symbol: str
 
         """
+        # return None
+        # print(f'_simple_collector symbol: {symbol}')
         self.sleep()
         df = self.get_data(symbol, self.interval, self.start_datetime, self.end_datetime)
         _result = self.NORMAL_FLAG
@@ -182,16 +184,33 @@ class BaseCollector(abc.ABC):
             if symbol in self.mini_symbol_map:
                 self.mini_symbol_map.pop(symbol)
             return self.NORMAL_FLAG
+    
+    def _test(self, symbol):
+        return symbol
 
     def _collector(self, instrument_list):
         error_symbol = []
+        print(f'max_workers: {self.max_workers}')
+        
+        # def test(instrument):
+        #     self._test(instrument)
+        #     # print(f'test {instrument}')
+        #     # return instrument
+        # # 使用 'loky' 后端来避免尝试序列化线程锁对象
+        # with parallel_backend('loky'):
+        #     res = Parallel(n_jobs=2)(
+        #         # delayed(self._simple_collector)(_inst) for _inst in tqdm(instrument_list)
+        #         delayed(test)(_inst) for _inst in tqdm(instrument_list)
+        #         # self._simple_collector(_inst) for _inst in tqdm(instrument_list)
+        #         # print('test')
+        #     )
         res = Parallel(n_jobs=self.max_workers)(
-            delayed(self._simple_collector)(_inst) for _inst in tqdm(instrument_list)
-        )
+                delayed(self._simple_collector)(_inst) for _inst in tqdm(instrument_list)
+            )
         for _symbol, _result in zip(instrument_list, res):
             if _result != self.NORMAL_FLAG:
                 error_symbol.append(_symbol)
-        print(error_symbol)
+        # print(error_symbol)
         logger.info(f"error symbol nums: {len(error_symbol)}")
         logger.info(f"current get symbol nums: {len(instrument_list)}")
         error_symbol.extend(self.mini_symbol_map.keys())
